@@ -1,0 +1,11 @@
+{
+  "name": "@1cc/worker",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "dependencies": {
+    "@1cc/config": "0.1.0",
+    "@1cc/contracts": "0.1.0"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "1cc-command-center",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "tsc -b packages/contracts packages/config packages/db apps/api apps/worker scripts",
+    "clean": "node -e \"const fs=require('fs');['apps/api/dist','apps/worker/dist','packages/config/dist','packages/contracts/dist','packages/db/dist','scripts/dist','scripts/tsconfig.tsbuildinfo'].forEach((path)=>fs.rmSync(path,{recursive:true,force:true}));\"",
+    "db:generate": "drizzle-kit generate --config=drizzle.config.ts",
+    "db:migrate": "npm run build && node scripts/dist/apply-drizzle-migrations.js",
+    "bootstrap:smartmoving-branch": "npm run build && node scripts/dist/bootstrap-smartmoving-branch.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.14",
+    "@types/pg": "^8.18.0",
+    "drizzle-kit": "^0.31.9",
+    "typescript": "^5.8.2"
+  }
+}
