@@ -9,7 +9,7 @@ async function main(): Promise<void> {
   loadDatabaseConfig(env);
 
   const dbClient = createDbClient({}, env);
-  const migrationsFolder = path.resolve(__dirname, "..", "drizzle");
+  const migrationsFolder = path.resolve(__dirname, "..", "..", "drizzle");
 
   try {
     await migrate(dbClient.db, {

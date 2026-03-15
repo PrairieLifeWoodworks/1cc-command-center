@@ -124,8 +124,12 @@ This is a living continuity file, not a historical artifact. When facts here con
   - separate Railway project created for `1cc-command-center`
   - project URL: `https://railway.com/project/8c985869-8762-4463-8fc4-da343bc958a2`
   - Postgres service exists and is online
-  - backend app service has not been created yet
-  - public app URL does not exist yet
+  - backend app service now exists and deploys successfully
+  - Railway deployment issue was fixed on GitHub by adding explicit build/start config
+  - service healthcheck `/health` is passing in Railway
+  - public domain/web URL is live: `https://1cc-command-center-production.up.railway.app`
+  - `SMARTMOVING_WEBHOOK_SECRET_PRIORITY_MAIN_OFFICE` is now set in Railway variables
+  - live smoke test has been completed successfully
 
 ## Current Env / Secret Classification
 - Shared runtime:
@@ -163,14 +167,24 @@ This is a living continuity file, not a historical artifact. When facts here con
 - Worker may suggest improvements, but does not get final say on architecture or semantics
 
 ## Current Next Step
-Next operator step is a real hosted smoke test:
-- add the backend service for this repo in Railway
-- set Railway/runtime env for this repo
-- run `npm run db:migrate` against Railway Postgres
-- run `npm run bootstrap:smartmoving-branch`
-- verify hosted ingress with manual `404`, `401`, and `202` checks from the runbook
+Latest completed operator step:
+- ran DB migration against Railway Postgres successfully
+- bootstrapped pilot tenant `priority-moving-services`
+- bootstrapped pilot branch `main-office`
+- created `smartmoving_connection` row with:
+  - `apiBaseUrl = https://api-public.smartmoving.com/v1`
+  - `apiKeySecretRef = SMARTMOVING_API_KEY_PRIORITY_MAIN_OFFICE`
+  - `webhookSecretRef = SMARTMOVING_WEBHOOK_SECRET_PRIORITY_MAIN_OFFICE`
+- verified live public endpoint behaviors:
+  - `/health` -> `200`
+  - unknown tenant/branch webhook -> `404`
+  - invalid auth webhook -> `401`
+  - valid auth webhook -> `202`
+- confirmed `401` and `202` requests were persisted in `raw_webhook_event`
 
-Only after that should the next worker slice add normalization or queueing.
+Next build step:
+- fix and commit the local `scripts/apply-drizzle-migrations.ts` path correction if it has not yet been pushed
+- then move into normalization / queueing as the next implementation slice
 
 ## Known Open Questions
 - Can SmartMoving expose timestamped outbound call/text/email attempts through any reliable read surface?
