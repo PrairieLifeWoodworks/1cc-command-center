@@ -9,6 +9,7 @@
   "scripts": {
     "build": "tsc -b packages/contracts packages/config packages/db apps/api apps/worker scripts",
     "start": "node apps/api/dist/index.js",
+    "start:worker": "node apps/worker/dist/index.js",
     "clean": "node -e \"const fs=require('fs');['apps/api/dist','apps/worker/dist','packages/config/dist','packages/contracts/dist','packages/db/dist','scripts/dist','scripts/tsconfig.tsbuildinfo'].forEach((path)=>fs.rmSync(path,{recursive:true,force:true}));\"",
     "db:generate": "drizzle-kit generate --config=drizzle.config.ts",
     "db:migrate": "npm run build && node scripts/dist/apply-drizzle-migrations.js",

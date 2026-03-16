@@ -1,6 +1,6 @@
 # SmartMoving Integration Source of Truth
 
-Last validated: March 12, 2026
+Last validated: March 15, 2026
 
 Purpose:
 - provide the current operational and architectural source of truth for SmartMoving integration decisions in `1cc-command-center`
@@ -250,7 +250,87 @@ Operational consequence:
 - they do not, from the published contract alone, prove that an outbound call, text, or email was actually sent
 - do not treat follow-ups or task items as definitive contact-attempt evidence until validated on live records
 
-## 7. Architecture Decisions Locked By These Findings
+## 7. Live Validation Findings
+### Real webhook delivery is proven
+Observed live on the Railway production endpoint:
+- `opportunity-created`
+- `opportunity-status-changed`
+- `opportunity-changed`
+
+Observed payloads remained thin and centered on:
+- `event-type`
+- `opportunity-id`
+- `opportunity-status`
+
+Operational consequence:
+- SmartMoving delivery itself is proven
+- webhook traffic is reliable enough for the backbone
+- payload thinness is confirmed in live operation, not just documentation
+
+### Hydration is proven
+Live `GET /api/opportunities/{opportunityId}` calls successfully returned:
+- quote number
+- customer details when available
+- branch
+- sales assignee
+- service date
+- status
+- lead status
+
+Operational consequence:
+- hydration is a proven operational pattern
+
+### Audit activity is useful for status and assignment changes
+Live `GET /api/opportunities/{opportunityId}/audit-activity` calls successfully returned useful, timestamped entries such as:
+- creation
+- reassignment
+- `Status changed to Lead in Progress from New Lead`
+- `Lead status changed to #1`
+- `Opportunity reopened`
+
+Operational consequence:
+- audit activity is a viable source for status and assignment timing
+- audit activity improves operational explainability even if it does not solve communication timing
+
+### Communication actions still collapse into generic change signals
+In live tests:
+- logged call activity triggered `opportunity-changed`
+- sent text activity triggered `opportunity-changed`
+- sent email activity triggered `opportunity-changed`
+- with all webhook types enabled, no distinct communication-specific webhook family was observed
+
+Operational consequence:
+- communication-related actions are confirmed to generate webhook traffic
+- that traffic still does not identify the communication channel in the payloads we observed
+
+### Tested public read surfaces still do not expose a clean communication timestamp
+In live tests:
+- `audit-activity` did not show fresh explicit call/text/email entries for the recent actions we triggered
+- `GET /api/premium/opportunities/{opportunityId}/followups` returned data in some cases, but did not surface the recent communication actions we were testing
+- `tasks[]` with `IncludeTasks=true` returned empty arrays in the tested fresh-lead case
+
+Operational consequence:
+- exact first-contact timing remains unproven from the public API surfaces we tested
+- the current best working conclusion is that SmartMoving tracks this internally for reporting, but the public API does not clearly expose it through the endpoints we exercised
+
+### Follow-up board is still viable as a separate module
+In live tests:
+- `GET /api/premium/opportunities/{opportunityId}/followups` did return real follow-up records
+- the returned follow-up shape includes:
+  - id
+  - opportunityId
+  - type
+  - title
+  - assignedToId
+  - dueDateTime
+  - completedAtUtc
+  - completed
+
+Operational consequence:
+- a due-follow-ups board is viable even if exact STL remains gated
+- a future 1CC internal operations view can aggregate follow-ups across companies and branches if the necessary list/discovery strategy is implemented
+
+## 8. Architecture Decisions Locked By These Findings
 ### Decision 1: webhook as trigger, API as truth
 Locked.
 
@@ -288,7 +368,20 @@ Reason:
 - multi-tenant and multi-branch are required
 - webhook auth and API credentials must be isolated by branch integration config
 
-## 8. Feasibility Assessment
+### Decision 6: exact STL is report-dependent until proven otherwise
+Locked for planning.
+
+Reason:
+- official help docs prove SmartMoving tracks `Time to Contact`, `Last Communication`, and related reporting dates
+- live webhook behavior for call/text/email still collapsed into generic `opportunity-changed`
+- live API reads tested so far did not expose clean communication timestamps
+
+Operational consequence:
+- exact Speed-to-Lead should be treated as gated and report-dependent unless SmartMoving confirms another public API surface
+- backbone work can proceed without blocking on exact STL
+- report ingestion or report-agent retrieval is now the leading fallback path for exact STL
+
+## 9. Feasibility Assessment
 ### Feasible now
 - hosted webhook relay
 - raw event persistence
@@ -328,22 +421,23 @@ That means:
 - the Speed-to-Lead module is feasible if we confirm one reliable communication-history source
 - if that source is not available, V1 should still ship with status and assignment-driven operational buckets, while exact outbound-attempt timing is either beta, partial, or deferred
 
-## 9. Recommended V1 Guardrails
+## 10. Recommended V1 Guardrails
 - keep the backend model as `webhook -> normalize -> dedupe -> hydrate -> project -> notify`
 - budget API usage carefully because duplicate webhook bursts can multiply hydration calls
 - treat `opportunity-changed` as a generic rehydrate signal, not a business event with stable semantics
 - keep status-code mapping in configuration
 - keep first-outbound-attempt logic behind a verification gate until we prove the source data
 - do not promise `Awaiting Contact` in V1 until communication outcomes are confirmed from real payloads or API reads
+- do not assume that enabling all webhook types will reveal communication-specific event families; live testing has already failed that assumption
 
-## 10. Immediate Next Verification Work
-1. Verify live responses for `GET /api/opportunities/{opportunityId}/audit-activity` on real records that include assignment and outbound contact activity.
+## 11. Immediate Next Verification Work
+1. Capture sanitized examples of every newly observed webhook event burst pattern for assignment, status change, and communication actions.
 2. Determine whether SmartMoving exposes any undocumented or account-specific read endpoints for communication history.
-3. Capture one sanitized payload for each newly observed webhook event type.
-4. Confirm whether `leadStatus` in opportunity details is stable enough to support any additional queue-state derivations.
+3. Verify whether Lead Status report exports populate `Time to Contact` and `Last Communication` consistently for the tested quotes.
+4. Confirm whether `leadStatus` in opportunity details is stable enough to support additional queue-state derivations.
 5. Validate real response shape for `GET /api/leads/statuses`, because the published schema metadata looks incorrect.
 
-## 11. Logged Open Questions For Speed-to-Lead Truth
+## 12. Logged Open Questions For Speed-to-Lead Truth
 These are not resolved by the public docs and should be answered through live tenant testing.
 
 ### Question 1: Are outbound contact attempts triggerable?
@@ -413,7 +507,7 @@ Metric integrity rule:
 - if polling only reveals that an attempt exists but not when it happened, then the system only knows the attempt occurred sometime between the previous poll and the current poll
 - in that case the product must either mark the metric as approximate or not use that source for production-truth Speed-to-Lead
 
-## 12. Report-Based Fallback Path
+## 13. Report-Based Fallback Path
 Official SmartMoving help content confirms two important facts:
 - the `Lead Status` report includes `Quote #`, `Branch`, `Sales Person`, `Received At`, `Time to Contact`, and `Last Communication`
 - SmartMoving’s enhanced reporting can export reports to Excel and can schedule report emails on `daily`, `weekly`, `bi-weekly`, or `monthly` cadence

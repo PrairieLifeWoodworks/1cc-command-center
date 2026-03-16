@@ -161,3 +161,43 @@ export const normalizedEvent = pgTable(
     index("normalized_event_entity_idx").on(table.entityType, table.entityId)
   ]
 );
+
+export const hydratedOpportunitySnapshot = pgTable(
+  "hydrated_opportunity_snapshot",
+  {
+    id: uuid("id").primaryKey(),
+    normalizedEventId: uuid("normalized_event_id")
+      .notNull()
+      .references(() => normalizedEvent.id),
+    rawEventId: uuid("raw_event_id")
+      .notNull()
+      .references(() => rawWebhookEvent.id),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenant.id),
+    branchId: uuid("branch_id")
+      .notNull()
+      .references(() => branch.id),
+    opportunityId: text("opportunity_id").notNull(),
+    fetchedAt: timestamp("fetched_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .notNull()
+      .defaultNow(),
+    opportunityJson: jsonb("opportunity_json").notNull(),
+    auditActivityJson: jsonb("audit_activity_json"),
+    followupsJson: jsonb("followups_json"),
+    snapshotVersion: text("snapshot_version").notNull()
+  },
+  (table) => [
+    uniqueIndex("hydrated_opportunity_snapshot_normalized_event_id_uidx").on(
+      table.normalizedEventId
+    ),
+    index("hydrated_opportunity_snapshot_opportunity_idx").on(
+      table.tenantId,
+      table.branchId,
+      table.opportunityId
+    )
+  ]
+);

@@ -17,6 +17,8 @@ This is a living continuity file, not a historical artifact. When facts here con
 - Product: `1cc-command-center`
 - V1 is desktop-first and read-only
 - First module: `Speed-to-Lead`
+- Strong candidate parallel or follow-on module: `Follow-Up Board`
+- Shell direction: shared tree-style filters with `Focused` and `Command` presets
 - Core pattern: `webhook -> persist raw -> normalize -> dedupe -> hydrate -> project -> notify`
 - Backend is authoritative
 - Electron local storage is cache only
@@ -38,12 +40,18 @@ This is a living continuity file, not a historical artifact. When facts here con
   - `50 BadLead`
 - Exact first outbound attempt truth is still not proven from published API/webhook docs
 - Report fallback is real: SmartMoving reporting includes `Time to Contact` and `Last Communication`
+- Live testing proved:
+  - `opportunity-created`, `opportunity-status-changed`, and `opportunity-changed` arrive in production
+  - call/text/email activity still surfaced as generic `opportunity-changed`
+  - audit reliably exposed creation, reassignment, reopen, and status transitions
+  - tested public API reads still did not expose a clean call/text/email timestamp
+  - followups endpoint returns real due-work records and is viable for a due-follow-ups board
 
 ## Source Hierarchy For STL Truth
 1. Direct timestamped API/event evidence if proven
-2. Active-set polling for unresolved assigned leads if timestamped attempt data is readable
-3. Report ingestion for authoritative fallback/backfill
-4. Browser-agent report retrieval only if direct product surfaces are insufficient
+2. Report ingestion for authoritative fallback/backfill
+3. Browser-agent report retrieval if report ingestion is not automatable enough
+4. Active-set polling only if a real communication timestamp source is later discovered in an API surface
 
 ## Research Guardrails
 - Do not make negative claims like "there is no way" until all relevant official surfaces were checked
@@ -181,14 +189,56 @@ Latest completed operator step:
   - invalid auth webhook -> `401`
   - valid auth webhook -> `202`
 - confirmed `401` and `202` requests were persisted in `raw_webhook_event`
+- confirmed live SmartMoving webhook delivery from the actual vendor
+- confirmed fresh-lead status transitions are visible in audit history with timestamps
+- confirmed call/text/email actions still arrived only as generic `opportunity-changed`
+- accepted the normalization backbone slice:
+  - accepted raw ingress now enqueues a PostgreSQL-backed normalization job
+  - worker consumes normalization jobs and writes `normalized_event`
+  - dedupe window is 120 seconds and now bounded on both sides to avoid out-of-order false duplicates
+- accepted the hydration backbone slice locally:
+  - non-duplicate hydratable normalized events enqueue a second PostgreSQL-backed hydration job
+  - worker can fetch SmartMoving opportunity details plus best-effort audit/followups
+  - `hydrated_opportunity_snapshot` persistence and pure Lead Flow / Follow-Up candidate mappers now exist
+  - normalize-to-hydrate retry path was corrected so a transient enqueue failure does not strand a normalized event without hydration
+  - this slice is accepted from local fake-backed verification only, not yet proven live in Railway
+- accepted the worker deployment-readiness slice:
+  - root `start:worker` command now exists
+  - Railway worker deployment is documented in `/Users/admin/Documents/OpenAI Codex Projects/1cc-command-center/docs/operations/RAILWAY_WORKER_SERVICE_RUNBOOK.md`
+  - root `railway.json` remains API-specific by design
+- confirmed the separate Railway worker service exists:
+  - service name: `1cc-worker`
+  - deploy completed successfully from the same GitHub repo
+  - required env vars are present, including `SMARTMOVING_API_KEY_PRIORITY_MAIN_OFFICE`
+  - no public domain is exposed for the worker service
+  - Railway UI still needs live job processing verification; quiet/`Completed` state alone is not proof of end-to-end work
+- live verification on March 16, 2026 showed:
+  - a real SmartMoving status change webhook for opportunity `a7a48717-1799-4f83-b41a-b40e01739ef3` reached `raw_webhook_event`
+  - `normalized_event` remained empty
+  - `hydrated_opportunity_snapshot` remained empty
+  - no `pgboss` schema/tables existed in Railway Postgres at query time
+  - current inference: Railway is still running an older deployed code path and the accepted local queue/hydration code has not been pushed and redeployed yet
 
 Next build step:
-- fix and commit the local `scripts/apply-drizzle-migrations.ts` path correction if it has not yet been pushed
-- then move into normalization / queueing as the next implementation slice
+- treat exact STL as report-dependent for planning
+- push the accepted local queue/hydration/worker-readiness code to GitHub
+- redeploy the Railway API and worker services from that updated repo state
+- then verify one real SmartMoving event creates `raw_webhook_event`, `normalized_event`, and `hydrated_opportunity_snapshot`
+- then move from hydration snapshots to final projection persistence for `Lead Flow` and `Follow-Up Board`
+- keep projection design aligned to `Lead Flow` and `Follow-Up Board`, not exact STL
+- research report-ingestion or report-agent architecture for exact STL
+- consider `Follow-Up Board` as the strongest non-STL module candidate because it fits the proven data better than exact communication timing
+
+Current planning artifact:
+- module ranking and shell split now live in:
+  - `/Users/admin/Documents/OpenAI Codex Projects/1cc-command-center/docs/architecture/1CC_COMMAND_CENTER_MODULE_PRIORITY_MAP.md`
 
 ## Known Open Questions
-- Can SmartMoving expose timestamped outbound call/text/email attempts through any reliable read surface?
-- If not, should STL exactness rely on report ingestion for authoritative backfill?
+- Can SmartMoving expose timestamped outbound call/text/email attempts through any reliable read surface beyond the public endpoints already tested?
+- What is the cleanest operating model for report ingestion:
+  - scheduled exports
+  - browser-agent pulls
+  - manual upload fallback
 - When live hydration begins, should `api_key_secret_ref` use the same env-backed secret-ref pattern as `webhook_secret_ref`?
 
 ## Reasoning Guidance

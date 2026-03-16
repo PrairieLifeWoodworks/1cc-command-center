@@ -324,13 +324,65 @@ For live bucket cards, compute current raw and business age from the same projec
 Build a module-capable Electron shell with:
 - auth bootstrap
 - tenant and branch selector
+- shell scope presets
 - entitlement-aware module registry
 - compact mode
 - expanded mode
 - settings modal
 
-V1 loads one module:
+V1 loads one primary module:
 - `speed_to_lead`
+
+Strong candidate parallel or follow-on module:
+- `follow_up_board`
+
+Reason:
+- exact STL is currently report-dependent
+- live SmartMoving testing already proved that follow-up reads are real enough to support a due-work board
+- this module fits both the client shell and the internal 1CC cross-account operations shell
+
+### Scope and Filter Model
+The shell should support a tree-style scope model so users can move from broad oversight to narrow execution without changing products.
+
+Recommended scope tree:
+- view preset
+  - `Focused`
+  - `Command`
+- scope mode
+  - `My Work`
+  - `Team / Branch`
+  - `All Companies`
+- company
+- branch
+- module
+- work-state filters
+  - due now
+  - due today
+  - overdue
+  - unassigned
+  - reopened
+  - lead in progress
+- assignee filter
+  - me
+  - specific rep
+  - all reps
+
+Design rule:
+- the scope/filter tree belongs to the shell, not to a single module
+- each module should inherit the same filtering model so the product scales consistently across tenants and operator roles
+
+### Shell Presets
+`Focused` should default to:
+- `My Work`
+- assigned records only
+- action-first lists
+- minimal noise
+
+`Command` should default to:
+- `All Companies`
+- cross-company oversight
+- triage and escalation workflows
+- internal 1CC operator use
 
 ### Compact Mode
 Compact mode should behave like a persistent widget:
@@ -348,6 +400,12 @@ Expanded mode adds:
 - branch selector
 - raw versus business-hours toggle
 - deeper health indicators
+
+If `follow_up_board` is enabled, expanded mode should also support:
+- due-today list ordered from nearest due time to furthest
+- columns for assignee, company, branch, lead or quote, and due time
+- company/branch aggregation for the internal 1CC operator view
+- tenant-scoped view for client-facing deployments
 
 ### Settings and State Model
 Persist locally:

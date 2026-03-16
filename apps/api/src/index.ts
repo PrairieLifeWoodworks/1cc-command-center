@@ -3,8 +3,13 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 
 import { loadApiConfig, resolveSecretRef } from "@1cc/config";
-import type { TenantBranchRouteParams } from "@1cc/contracts";
 import {
+  SMARTMOVING_RAW_WEBHOOK_NORMALIZE_JOB_NAME,
+  type SmartMovingRawWebhookNormalizeJobPayload,
+  type TenantBranchRouteParams
+} from "@1cc/contracts";
+import {
+  createNormalizationJobQueue,
   createDbClient,
   findBranchByTenantAndSlug,
   findSmartMovingConnectionByBranchId,
@@ -41,8 +46,28 @@ export interface SmartMovingIngressRepository {
   close?(): Promise<void>;
 }
 
+export interface SmartMovingNormalizationJobPublisher {
+  publish(
+    payload: SmartMovingRawWebhookNormalizeJobPayload
+  ): Promise<string | null>;
+  close?(): Promise<void>;
+}
+
+export interface SmartMovingIngressRequest {
+  tenantSlug: string;
+  branchSlug: string;
+  headers: Record<string, string | string[] | undefined>;
+  body: unknown;
+}
+
+export interface SmartMovingIngressResult {
+  statusCode: number;
+  body: Record<string, unknown>;
+}
+
 export interface BuildApiServerOptions {
   ingressRepository?: SmartMovingIngressRepository;
+  normalizationJobPublisher?: SmartMovingNormalizationJobPublisher;
   secretResolver?: (
     ref: string,
     env?: NodeJS.ProcessEnv
@@ -114,6 +139,145 @@ function createDefaultIngressRepository(
   };
 }
 
+function createDefaultNormalizationJobPublisher(
+  env: NodeJS.ProcessEnv = process.env
+): SmartMovingNormalizationJobPublisher {
+  return createNormalizationJobQueue({}, env);
+}
+
+export async function handleSmartMovingWebhookIngress(
+  input: SmartMovingIngressRequest,
+  dependencies: {
+    ingressRepository: SmartMovingIngressRepository;
+    normalizationJobPublisher: SmartMovingNormalizationJobPublisher;
+    secretResolver: (
+      ref: string,
+      env?: NodeJS.ProcessEnv
+    ) => string | undefined;
+    env?: NodeJS.ProcessEnv;
+  }
+): Promise<SmartMovingIngressResult> {
+  const env = dependencies.env ?? process.env;
+  const tenantRecord = await dependencies.ingressRepository.findTenantBySlug(
+    input.tenantSlug
+  );
+
+  if (!tenantRecord) {
+    return {
+      statusCode: 404,
+      body: {
+        ok: false,
+        status: "not_found",
+        message: `Tenant '${input.tenantSlug}' was not found.`
+      }
+    };
+  }
+
+  const branchRecord = await dependencies.ingressRepository.findBranchByTenantAndSlug(
+    tenantRecord.id,
+    input.branchSlug
+  );
+
+  if (!branchRecord) {
+    return {
+      statusCode: 404,
+      body: {
+        ok: false,
+        status: "not_found",
+        message: `Branch '${input.branchSlug}' was not found for tenant '${input.tenantSlug}'.`
+      }
+    };
+  }
+
+  const connectionRecord =
+    await dependencies.ingressRepository.findSmartMovingConnectionByBranchId(
+      branchRecord.id
+    );
+
+  if (!connectionRecord) {
+    return {
+      statusCode: 503,
+      body: {
+        ok: false,
+        status: "integration_not_configured",
+        message: "SmartMoving integration is not configured for this branch."
+      }
+    };
+  }
+
+  const expectedSecret = dependencies.secretResolver(
+    connectionRecord.webhookSecretRef,
+    env
+  );
+
+  if (!expectedSecret) {
+    return {
+      statusCode: 503,
+      body: {
+        ok: false,
+        status: "integration_not_configured",
+        message:
+          "The SmartMoving webhook secret reference is configured, but the runtime secret is missing."
+      }
+    };
+  }
+
+  const payloadJson = payloadToJson(input.body);
+  const payloadHash = computePayloadHash(payloadJson);
+  const headersJson = headersToJson(input.headers);
+  const authHeader = readAuthHeader(input.headers["x-smartmoving-auth"]);
+
+  if (!secretsMatch(expectedSecret, authHeader)) {
+    await dependencies.ingressRepository.insertRawWebhookEvent({
+      tenantId: tenantRecord.id,
+      branchId: branchRecord.id,
+      source: "smartmoving",
+      headersJson,
+      payloadJson,
+      payloadHash,
+      authResult: "rejected_invalid_auth"
+    });
+
+    return {
+      statusCode: 401,
+      body: {
+        ok: false,
+        status: "unauthorized",
+        message:
+          "The SmartMoving webhook auth header did not match the configured secret."
+      }
+    };
+  }
+
+  const rawWebhookEventRecord =
+    await dependencies.ingressRepository.insertRawWebhookEvent({
+      tenantId: tenantRecord.id,
+      branchId: branchRecord.id,
+      source: "smartmoving",
+      headersJson,
+      payloadJson,
+      payloadHash,
+      authResult: "accepted"
+    });
+
+  await dependencies.normalizationJobPublisher.publish({
+    rawEventId: rawWebhookEventRecord.id,
+    tenantId: tenantRecord.id,
+    branchId: branchRecord.id
+  });
+
+  return {
+    statusCode: 202,
+    body: {
+      ok: true,
+      status: "accepted",
+      message: "Raw SmartMoving webhook ingress accepted.",
+      rawEventId: rawWebhookEventRecord.id,
+      enqueuedJob: SMARTMOVING_RAW_WEBHOOK_NORMALIZE_JOB_NAME
+    }
+  };
+}
+
 export function buildApiServer(
   options: BuildApiServerOptions = {}
 ): FastifyInstance {
@@ -121,6 +285,9 @@ export function buildApiServer(
   const config = loadApiConfig(env);
   const ingressRepository =
     options.ingressRepository ?? createDefaultIngressRepository(env);
+  const normalizationJobPublisher =
+    options.normalizationJobPublisher ??
+    createDefaultNormalizationJobPublisher(env);
   const secretResolver = options.secretResolver ?? resolveSecretRef;
 
   const app = Fastify({
@@ -135,6 +302,12 @@ export function buildApiServer(
     });
   }
 
+  if (normalizationJobPublisher.close) {
+    app.addHook("onClose", async () => {
+      await normalizationJobPublisher.close?.();
+    });
+  }
+
   app.get("/health", async () => {
     return {
       ok: true,
@@ -145,107 +318,24 @@ export function buildApiServer(
   app.post<{ Params: TenantBranchRouteParams }>(
     "/webhook/smartmoving/:tenantSlug/:branchSlug",
     async (request, reply) => {
-      const tenantRecord = await ingressRepository.findTenantBySlug(
-        request.params.tenantSlug
+      const result = await handleSmartMovingWebhookIngress(
+        {
+          tenantSlug: request.params.tenantSlug,
+          branchSlug: request.params.branchSlug,
+          headers: request.headers,
+          body: request.body
+        },
+        {
+          ingressRepository,
+          normalizationJobPublisher,
+          secretResolver,
+          env
+        }
       );
 
-      if (!tenantRecord) {
-        reply.code(404);
+      reply.code(result.statusCode);
 
-        return {
-          ok: false,
-          status: "not_found",
-          message: `Tenant '${request.params.tenantSlug}' was not found.`
-        };
-      }
-
-      const branchRecord = await ingressRepository.findBranchByTenantAndSlug(
-        tenantRecord.id,
-        request.params.branchSlug
-      );
-
-      if (!branchRecord) {
-        reply.code(404);
-
-        return {
-          ok: false,
-          status: "not_found",
-          message: `Branch '${request.params.branchSlug}' was not found for tenant '${request.params.tenantSlug}'.`
-        };
-      }
-
-      const connectionRecord =
-        await ingressRepository.findSmartMovingConnectionByBranchId(
-          branchRecord.id
-        );
-
-      if (!connectionRecord) {
-        reply.code(503);
-
-        return {
-          ok: false,
-          status: "integration_not_configured",
-          message: "SmartMoving integration is not configured for this branch."
-        };
-      }
-
-      const expectedSecret = secretResolver(connectionRecord.webhookSecretRef, env);
-
-      if (!expectedSecret) {
-        reply.code(503);
-
-        return {
-          ok: false,
-          status: "integration_not_configured",
-          message:
-            "The SmartMoving webhook secret reference is configured, but the runtime secret is missing."
-        };
-      }
-
-      const payloadJson = payloadToJson(request.body);
-      const payloadHash = computePayloadHash(payloadJson);
-      const headersJson = headersToJson(request.headers);
-      const authHeader = readAuthHeader(request.headers["x-smartmoving-auth"]);
-
-      if (!secretsMatch(expectedSecret, authHeader)) {
-        await ingressRepository.insertRawWebhookEvent({
-          tenantId: tenantRecord.id,
-          branchId: branchRecord.id,
-          source: "smartmoving",
-          headersJson,
-          payloadJson,
-          payloadHash,
-          authResult: "rejected_invalid_auth"
-        });
-
-        reply.code(401);
-
-        return {
-          ok: false,
-          status: "unauthorized",
-          message:
-            "The SmartMoving webhook auth header did not match the configured secret."
-        };
-      }
-
-      const rawWebhookEventRecord = await ingressRepository.insertRawWebhookEvent({
-        tenantId: tenantRecord.id,
-        branchId: branchRecord.id,
-        source: "smartmoving",
-        headersJson,
-        payloadJson,
-        payloadHash,
-        authResult: "accepted"
-      });
-
-      reply.code(202);
-
-      return {
-        ok: true,
-        status: "accepted",
-        message: "Raw SmartMoving webhook ingress accepted.",
-        rawEventId: rawWebhookEventRecord.id
-      };
+      return result.body;
     }
   );
 

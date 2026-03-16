@@ -6,7 +6,9 @@
   "types": "dist/index.d.ts",
   "dependencies": {
     "@1cc/config": "0.1.0",
+    "@1cc/contracts": "0.1.0",
     "drizzle-orm": "^0.45.1",
-    "pg": "^8.20.0"
+    "pg": "^8.20.0",
+    "pg-boss": "^10.1.6"
   }
 }

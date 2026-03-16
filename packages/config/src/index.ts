@@ -42,6 +42,20 @@ export interface SmartMovingBranchBootstrapConfig {
   smartmovingOnboardingStatus: string;
 }
 
+export const SMARTMOVING_OPPORTUNITY_STATUS_LABELS: Readonly<
+  Record<string, string>
+> = {
+  "0": "NewLead",
+  "1": "LeadInProgress",
+  "3": "Opportunity",
+  "4": "Booked",
+  "10": "Completed",
+  "11": "Closed",
+  "20": "Cancelled",
+  "30": "Lost",
+  "50": "BadLead"
+};
+
 const NODE_ENVS: readonly NodeEnv[] = ["development", "test", "production"];
 const LOG_LEVELS: readonly LogLevel[] = [
   "fatal",
@@ -129,6 +143,22 @@ export function resolveSecretRef(
   const value = env[ref];
 
   return value && value.trim().length > 0 ? value : undefined;
+}
+
+export function resolveSmartMovingOpportunityStatusLabel(
+  value: string | number | null | undefined
+): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const normalizedValue = String(value).trim();
+
+  if (normalizedValue.length === 0) {
+    return null;
+  }
+
+  return SMARTMOVING_OPPORTUNITY_STATUS_LABELS[normalizedValue] ?? null;
 }
 
 function readDatabaseSsl(value: string | undefined): boolean {
