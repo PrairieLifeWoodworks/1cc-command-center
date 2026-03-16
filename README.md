@@ -38,6 +38,7 @@ The DB scaffold does not connect on import and does not run migrations against a
 `db:migrate` applies the existing SQL migrations in `drizzle/` to the target Postgres database using the configured `DATABASE_URL`.
 `bootstrap:smartmoving-branch` is a pilot-only setup command that upserts one tenant, one branch, and one `smartmoving_connection` from environment variables.
 Accepted SmartMoving raw webhooks are persisted by the API, enqueued to PostgreSQL-backed jobs, normalized by the worker, and hydrated into durable opportunity snapshots.
+The queue layer explicitly creates the normalization and hydration queues and only treats enqueue as successful when `pg-boss` returns a real job id.
 Projection-candidate mappers for Lead Flow and Follow-Up Board exist in the worker layer, but final persisted product projection tables are still deferred.
 
 Hosted Railway smoke-test steps live in [docs/operations/HOSTED_SMOKE_TEST_RUNBOOK.md](/Users/admin/Documents/OpenAI Codex Projects/1cc-command-center/docs/operations/HOSTED_SMOKE_TEST_RUNBOOK.md).

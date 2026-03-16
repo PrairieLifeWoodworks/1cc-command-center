@@ -15,6 +15,14 @@ export interface SmartMovingRawWebhookNormalizeJobPayload {
 export const SMARTMOVING_NORMALIZED_EVENT_HYDRATE_JOB_NAME =
   "smartmoving.normalized-event.hydrate";
 
+export const SMARTMOVING_JOB_QUEUE_NAMES = [
+  SMARTMOVING_RAW_WEBHOOK_NORMALIZE_JOB_NAME,
+  SMARTMOVING_NORMALIZED_EVENT_HYDRATE_JOB_NAME
+] as const;
+
+export type SmartMovingJobQueueName =
+  (typeof SMARTMOVING_JOB_QUEUE_NAMES)[number];
+
 export interface SmartMovingNormalizedEventHydrateJobPayload {
   normalizedEventId: string;
   rawEventId: string;

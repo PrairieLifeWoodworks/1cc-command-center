@@ -217,12 +217,17 @@ Latest completed operator step:
   - `normalized_event` remained empty
   - `hydrated_opportunity_snapshot` remained empty
   - no `pgboss` schema/tables existed in Railway Postgres at query time
-  - current inference: Railway is still running an older deployed code path and the accepted local queue/hydration code has not been pushed and redeployed yet
+- after push/redeploy to commit `3d75a35`, a manual live webhook test still returned `202` with `enqueuedJob = smartmoving.raw-webhook.normalize`, but:
+    - `normalized_event` remained empty
+    - `hydrated_opportunity_snapshot` remained empty
+    - `pgboss.queue` existed only with internal queue `__pgboss__send-it`
+    - `pgboss.job` remained empty
+  - current inference: the live enqueue path is silently dropping work, likely because the application is not explicitly creating queues and is treating a null/empty `pg-boss` send result as success
 
 Next build step:
 - treat exact STL as report-dependent for planning
-- push the accepted local queue/hydration/worker-readiness code to GitHub
-- redeploy the Railway API and worker services from that updated repo state
+- fix the live pg-boss enqueue path so queue creation is explicit and a failed/empty send does not return `202`
+- redeploy the Railway API and worker services with that correction
 - then verify one real SmartMoving event creates `raw_webhook_event`, `normalized_event`, and `hydrated_opportunity_snapshot`
 - then move from hydration snapshots to final projection persistence for `Lead Flow` and `Follow-Up Board`
 - keep projection design aligned to `Lead Flow` and `Follow-Up Board`, not exact STL

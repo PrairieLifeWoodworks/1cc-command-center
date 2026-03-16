@@ -49,7 +49,7 @@ export interface SmartMovingIngressRepository {
 export interface SmartMovingNormalizationJobPublisher {
   publish(
     payload: SmartMovingRawWebhookNormalizeJobPayload
-  ): Promise<string | null>;
+  ): Promise<string>;
   close?(): Promise<void>;
 }
 
@@ -103,6 +103,10 @@ function computePayloadHash(payload: unknown): string {
   const serializedPayload = JSON.stringify(payload) ?? "null";
 
   return createHash("sha256").update(serializedPayload).digest("hex");
+}
+
+function hasJobId(jobId: string | null | undefined): jobId is string {
+  return typeof jobId === "string" && jobId.trim().length > 0;
 }
 
 function secretsMatch(
@@ -260,11 +264,30 @@ export async function handleSmartMovingWebhookIngress(
       authResult: "accepted"
     });
 
-  await dependencies.normalizationJobPublisher.publish({
-    rawEventId: rawWebhookEventRecord.id,
-    tenantId: tenantRecord.id,
-    branchId: branchRecord.id
-  });
+  try {
+    const normalizationJobId = await dependencies.normalizationJobPublisher.publish({
+      rawEventId: rawWebhookEventRecord.id,
+      tenantId: tenantRecord.id,
+      branchId: branchRecord.id
+    });
+
+    if (!hasJobId(normalizationJobId)) {
+      throw new Error(
+        `Normalization enqueue returned no job id for raw event '${rawWebhookEventRecord.id}'.`
+      );
+    }
+  } catch {
+    return {
+      statusCode: 503,
+      body: {
+        ok: false,
+        status: "queue_unavailable",
+        message:
+          "Raw SmartMoving webhook ingress was persisted, but normalization enqueue failed.",
+        rawEventId: rawWebhookEventRecord.id
+      }
+    };
+  }
 
   return {
     statusCode: 202,

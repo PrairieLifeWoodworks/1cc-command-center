@@ -6,8 +6,10 @@ import {
   type SmartMovingRawWebhookNormalizeJobPayload
 } from "@1cc/contracts";
 import {
+  createQueueRegistrationState,
   createDbClient,
   createPgBossClient,
+  ensureSmartMovingJobQueues,
   findHydratedOpportunitySnapshotByNormalizedEventId,
   findNormalizedEventById,
   findRawWebhookEventById,
@@ -15,6 +17,7 @@ import {
   findSmartMovingConnectionByBranchId,
   insertHydratedOpportunitySnapshot,
   insertNormalizedEvent,
+  publishJobToQueue,
   type DbClient
 } from "@1cc/db";
 
@@ -36,6 +39,7 @@ import {
 export interface WorkerBoss {
   start(): Promise<unknown>;
   stop(): Promise<unknown>;
+  createQueue(name: string): Promise<void>;
   send(name: string, data: object): Promise<string | null>;
   work(
     name: string,
@@ -108,11 +112,13 @@ export function buildWorkerService(
       repository,
       env
     });
+  const queueState = createQueueRegistrationState();
   let started = false;
 
   return {
     async start(): Promise<void> {
       await boss.start();
+      await ensureSmartMovingJobQueues(boss, queueState);
       started = true;
       await boss.work(
         SMARTMOVING_RAW_WEBHOOK_NORMALIZE_JOB_NAME,
@@ -137,9 +143,11 @@ export function buildWorkerService(
               );
 
             if (!existingSnapshot) {
-              await boss.send(
+              await publishJobToQueue(
+                boss,
                 SMARTMOVING_NORMALIZED_EVENT_HYDRATE_JOB_NAME,
-                hydrationJob
+                hydrationJob,
+                queueState
               );
             }
           }
