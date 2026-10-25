@@ -15,6 +15,9 @@
     "db:migrate": "npm run build && node scripts/dist/apply-drizzle-migrations.js",
     "bootstrap:smartmoving-branch": "npm run build && node scripts/dist/bootstrap-smartmoving-branch.js"
   },
+  "engines": {
+    "node": "18"
+  },
   "devDependencies": {
     "@types/node": "^22.13.14",
     "@types/pg": "^8.18.0",
